@@ -47,7 +47,7 @@ namespace pic2wav
             // That means that we have 2 * 1/60s per line
             const float secondsPerLine = 2.0f * 1.0f / 60.0f;
             const uint samplesPerLine = (uint)(secondsPerLine * sampleRate + 0.5);
-            const uint numSamples = (uint)(samplesPerLine * requiredResolution);
+            const uint numSamples = (uint)(samplesPerLine * (requiredResolution - 1));
 
             // Shannon theorem says our max frequency is sampleRate/2, but reality looks different in our pipeline.
             // These values have been acquired empirically by checking what our shadertoy actually displays for a test image/sound.
@@ -76,27 +76,32 @@ namespace pic2wav
                     WriteWavHeader(wr, numSamples, sampleRate, numChannels, bytesPerSample);
 
                     uint sampleIndex = 0;
-                    for (int imageY = 0; imageY<requiredResolution; ++imageY)
+                    for (int imageY = 0; imageY<requiredResolution-1; ++imageY)
                     {
                         for (uint sampleIndexLine = 0; sampleIndexLine < samplesPerLine; ++sampleIndexLine, ++sampleIndex)
                         {
                             float t = (float)sampleIndex / sampleRate;
-                            float rawSignal = 0.0f;
+                            float rawSignalOld = 0.0f;
+                            float rawSignalNew = 0.0f;
                             for (int imageX = 0; imageX<requiredResolution; ++imageX)        
                             {
                                 float frequency = imageX * xToFrequency;
-                                float amplitude = pixels[imageY, imageX];
-                                rawSignal += (float)Math.Sin(t * Math.PI * 2.0f * frequency) * amplitude;
+                                rawSignalOld += (float)Math.Sin(t * Math.PI * 2.0f * frequency) * pixels[imageY, imageX];
+                                rawSignalNew += (float)Math.Sin(t * Math.PI * 2.0f * frequency) * pixels[imageY + 1, imageX];
                             }
-                            rawSignal /= maxAmplitudes[imageY];
+                            rawSignalOld /= maxAmplitudes[imageY];
+                            rawSignalNew /= maxAmplitudes[imageY+1];
 
                             // Fade line in/out.
                             // This improves quality tremendously as we get fewer ghost frequencies when switching from line to line.
-                            // (experimented with linear and square fades before, gauss is unsurprisngly better)
-                            float factor = (float)sampleIndexLine / (samplesPerLine - 1) * 2.0f - 1.0f;
+                            // (experimented with linear and square fades before, gauss is unsurprisngly much better)
+                            float factor = (float)sampleIndexLine / (samplesPerLine - 1);
                             const float gaussVar = 4.0f;
-                            rawSignal *= (float)Math.Exp(-factor * factor * gaussVar);
+                            factor = (float)Math.Exp(-factor * factor * gaussVar);
+                            rawSignalOld *= factor;
+                            rawSignalNew *= 1.0f - factor;
 
+                            float rawSignal = rawSignalOld + rawSignalNew;
                             short quantizedSignal = (short)Math.Clamp(rawSignal * short.MaxValue - 0.5, short.MinValue, short.MaxValue);
                             wr.Write(quantizedSignal);
                         }
@@ -108,7 +113,7 @@ namespace pic2wav
         static void Main(string[] args)
         {
             WriteImageToWav("line.png", "line.wav");
-         //   WriteImageToWav("purple.png", "purple.wav");
+            WriteImageToWav("purple.png", "purple.wav");
         }
     }
 }
